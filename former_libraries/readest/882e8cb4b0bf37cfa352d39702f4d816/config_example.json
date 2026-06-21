@@ -1,0 +1,61 @@
+{
+    "viewSettings": {
+        "paragraphMode": {
+            "enabled": false
+        },
+        "ttsHighlightOptions": {
+            "style": "highlight",
+            "color": "#808080"
+        },
+        "noteExportConfig": {
+            "includeTitle": true,
+            "includeAuthor": true,
+            "includeDate": true,
+            "includeChapterTitles": true,
+            "includeQuotes": true,
+            "includeNotes": true,
+            "includePageNumber": true,
+            "includeTimestamp": false,
+            "includeChapterSeparator": false,
+            "linkType": "app",
+            "noteSeparator": "\n\n",
+            "useCustomTemplate": false,
+            "customTemplate": "",
+            "exportAsPlainText": false
+        }
+    },
+    "searchConfig": {},
+    "schemaVersion": 1,
+    "updatedAt": 1782022172723,
+    "booknotes": [
+        {
+            "bookHash": "882e8cb4b0bf37cfa352d39702f4d816",
+            "metaHash": "8776751986ecf266aecbec22acc50228",
+            "id": "i04f91w",
+            "type": "annotation",
+            "cfi": "epubcfi(/6/12!/4/4/122,/1:0,/1:18)",
+            "xpointer0": null,
+            "xpointer1": null,
+            "page": 7,
+            "text": "I wrote this book ",
+            "style": "underline",
+            "color": "green",
+            "note": "",
+            "global": null,
+            "createdAt": 1782022162463,
+            "updatedAt": 1782022162463,
+            "deletedAt": null
+        }
+    ],
+    "progress": [
+        7,
+        264
+    ],
+    "location": "epubcfi(/6/14)",
+    "lastSyncedAtConfig": 1781851716858,
+    "lastSyncedAtNotes": 1782022162269,
+    "lastPushedAtConfig": 1781850617308,
+    "bookHash": "882e8cb4b0bf37cfa352d39702f4d816",
+    "metaHash": "8776751986ecf266aecbec22acc50228",
+    "lastPushedAtNotes": 1782022162796
+}

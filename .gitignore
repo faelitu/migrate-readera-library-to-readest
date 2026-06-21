@@ -218,6 +218,16 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Real inputs (not examples)
-library.json
 readest_groups.json
-groups.json
+
+former_libraries/**/*
+!former_libraries/
+!former_libraries/readest/
+!former_libraries/readest/882e8cb4b0bf37cfa352d39702f4d816/
+!former_libraries/**/*_example.json
+
+readest_migrated/**
+!readest_migrated/**/*_example.json
+
+# Misc.
+test.py

@@ -1,6 +1,5 @@
-#!/usr/bin/env python3
 """
-readera_to_readest.py
+migrate.py
 ---------------------
 Migrates reading progress and groups (collections) from ReadEra to Readest.
 
@@ -16,9 +15,9 @@ Outputs:
   - Updated Readest groups file (JSON)
 
 Usage:
-    python readera_to_readest.py [options]
+    python migrate.py [options]
 
-    python readera_to_readest.py \\
+    python migrate.py \\
         --readera     readera-library.json \\
         --readest     readest-library.json \\
         --groups      readest_groups.json  \\
@@ -26,17 +25,75 @@ Usage:
         --out-groups  readest_groups-migrated.json
 """
 
+import os
+import re
+import sys
 import json
-import random
+import uuid
+import difflib
 import argparse
+import platform
+import warnings
 import unicodedata
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, Set, List
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ──────────────────────────────────────────────────────────────────────────────
+
+def get_library_directory(program_name: str) -> str:
+    """
+    """
+    home = None
+    if platform.system() == 'Windows':
+        home = os.getenv('USERPROFILE')
+    else:
+        home = os.getenv('HOME')
+
+    if not home:
+        raise EnvironmentError("Could not determine the user's home directory.")
+
+    if program_name.lower() == 'readera':
+        warnings.warn(
+            f"ReadEra support is not fully tested. Using the in-app directory as a fallback. "
+            f"Please upload the ReadEra's library file in './former_libraries/readera/'.",
+            UserWarning,
+            stacklevel=2
+        )
+        return os.path.join(
+            os.path.dirname(os.path.abspath(sys.argv[0])), 
+            'former_libraries', 'readera'
+        )
+    
+    if program_name.lower() == 'readest':
+        readest_lib_dir = os.path.join(home, 'AppData', 'Roaming', 'com.bilingify.readest', 'Readest', 'Books')
+
+        if os.path.isfile(readest_lib_dir):
+            return readest_lib_dir
+        else:
+            warnings.warn(
+                f"Readest's library not found in current environment. "
+                f"Please upload the Readest's library files in './former_libraries/readest/'.",
+                UserWarning,
+                stacklevel=2
+            )
+            return os.path.join(
+                os.path.dirname(os.path.abspath(sys.argv[0])), 
+                'former_libraries', 'readest'
+            )
+    else:
+        raise ValueError(f"Unknown program name: {program_name}")
+    
+def get_readest_groups_filepath():
+    library_filepath = os.path.join(get_library_directory('readest'), 'library.json')
+    # TODO: montar dict de grupos e sobrescrever o groups.json
+    return os.path.join(
+        os.path.dirname(os.path.abspath(sys.argv[0])), 
+        'former_libraries', 'readest', 'groups.json'
+    )
 
 def normalize_title(title: str) -> str:
     """
@@ -45,9 +102,32 @@ def normalize_title(title: str) -> str:
 
     Example: "Crepúsculo dos Ídolos" → "crepusculo dos idolos"
     """
+    if not title:
+        return ''
+
+    # remove diacritics
     nfd = unicodedata.normalize('NFD', title)
     sem_acentos = ''.join(c for c in nfd if not unicodedata.combining(c))
-    return sem_acentos.lower().strip()
+    s = sem_acentos.lower()
+
+    # remove common noisy prefixes
+    prefixes = [r'^microsoft word -', r'^ebook\s*-?', r'^pdfcoffee\.com_', r'^pdfcoffee\.com', r'^dokumen\.pub_', r'^ebook\s']
+    for p in prefixes:
+        s = re.sub(p, ' ', s)
+
+    # normalize separators
+    s = s.replace('_', ' ').replace('-', ' ')
+
+    # strip common file extensions
+    s = re.sub(r"\.(rtf|docx?|pdf|epub)$", '', s)
+
+    # remove non-alphanumeric (keep spaces)
+    s = re.sub(r"[^0-9a-z ]+", ' ', s)
+
+    # collapse whitespace
+    s = re.sub(r'\s+', ' ', s).strip()
+
+    return s
 
 
 def generate_group_id(existing_ids: Set[str], length: int = 7) -> str:
@@ -58,7 +138,7 @@ def generate_group_id(existing_ids: Set[str], length: int = 7) -> str:
     The format follows the pattern observed in Readest groups: e.g. "f882f2c".
     """
     while True:
-        new_id = ''.join(random.choices('0123456789abcdef', k=length))
+        new_id = uuid.uuid4().hex[:length]
         if new_id not in existing_ids:
             return new_id
 
@@ -87,7 +167,7 @@ def extract_progress(doc_position_str: str) -> Optional[List[int]]:
 
 def build_readera_index(
     readera: dict,
-) -> Tuple[Dict[str, Tuple[str, dict]], Dict[str, str]]:
+) -> Tuple[Dict[str, Tuple[str, dict]], Dict[str, str], Dict[str, Tuple[str, dict]], Dict[str, Tuple[str, dict]]]:
     """
     Builds two indexes from the ReadEra library:
 
@@ -116,12 +196,87 @@ def build_readera_index(
 
     # Normalized title → (uri, doc_data)
     doc_map: Dict[str, Tuple[str, dict]] = {}
-    for uri, data in uri_to_data.items():
-        title = data.get('doc_title') or data.get('doc_file_name_title', '')
-        if title:
-            doc_map[normalize_title(title)] = (uri, data)
+    # identifier maps for direct matching
+    md5_map: Dict[str, Tuple[str, dict]] = {}
+    sha1_map: Dict[str, Tuple[str, dict]] = {}
 
-    return doc_map, doc_to_coll
+    for uri, data in uri_to_data.items():
+        # populate id maps
+        md5 = data.get('doc_md5')
+        sha1 = data.get('doc_sha1')
+        if md5:
+            md5_map[md5] = (uri, data)
+        if sha1:
+            sha1_map[sha1] = (uri, data)
+
+        # collect candidate title sources
+        candidates = []
+        if data.get('doc_title'):
+            candidates.append(data.get('doc_title'))
+        if data.get('doc_file_name_title'):
+            candidates.append(data.get('doc_file_name_title'))
+
+        # some ReadEra entries may include nested metadata
+        meta = data.get('meta', {}) or {}
+        if isinstance(meta, dict):
+            mt = meta.get('title') or meta.get('identifier')
+            if mt:
+                candidates.append(mt)
+
+        for t in candidates:
+            nt = normalize_title(t)
+            if nt and nt not in doc_map:
+                doc_map[nt] = (uri, data)
+
+        # fallback: ensure filename is indexed
+        fname = data.get('doc_file_name_title') or ''
+        nf = normalize_title(fname)
+        if nf and nf not in doc_map:
+            doc_map[nf] = (uri, data)
+
+    return doc_map, doc_to_coll, md5_map, sha1_map
+
+
+def find_best_match(readest_title: str, norm_title: str, doc_map: Dict[str, Tuple[str, dict]], 
+                    hard_mismatches: Dict, topn: int = 3,
+                    ratio_thresh: float = 0.58, overlap_thresh: float = 0.5):
+    """
+    Return best match (uri,data) if it passes thresholds, else (None, candidates).
+    First checks hard_mismatches for manual overrides, then does fuzzy matching.
+    Candidates is a list of tuples (candidate_title, ratio, overlap, uri).
+    """
+    if not norm_title:
+        return None, []
+
+    # 1) Check hard_mismatches first
+    if readest_title in hard_mismatches:
+        readera_candidates = hard_mismatches[readest_title]
+        for readera_title in readera_candidates:
+            readera_norm = normalize_title(readera_title)
+            if readera_norm in doc_map:
+                uri, data = doc_map[readera_norm]
+                return (uri, data), [(readera_norm, 1.0, 1.0, uri)]
+
+    # 2) Fuzzy matching
+    tokens_a = set(norm_title.split())
+    scores = []
+    for cand, (uri, data) in doc_map.items():
+        ratio = difflib.SequenceMatcher(None, norm_title, cand).ratio()
+        tokens_b = set(cand.split())
+        min_len = max(1, min(len(tokens_a), len(tokens_b)))
+        overlap = len(tokens_a & tokens_b) / min_len
+        scores.append((ratio, overlap, cand, uri))
+
+    # sort by ratio then overlap
+    scores.sort(key=lambda x: (x[0], x[1]), reverse=True)
+
+    candidates = [(c[2], round(c[0], 3), round(c[1], 3), c[3]) for c in scores[:topn]]
+    if scores:
+        best = scores[0]
+        if best[0] >= ratio_thresh and best[1] >= overlap_thresh:
+            return (best[3], doc_map[best[2]][1]), candidates
+
+    return None, candidates
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -156,7 +311,16 @@ def migrate(
         readest_groups: List[dict] = json.load(f)
 
     # ── 2. Build ReadEra indexes ─────────────────────────────────────────────
-    doc_map, doc_to_coll = build_readera_index(readera)
+    doc_map, doc_to_coll, md5_map, sha1_map = build_readera_index(readera)
+
+    # ── 2b. Load hard_mismatches for manual overrides ─────────────────────────
+    hard_mismatches: Dict = {}
+    try:
+        with open('knowledge/hard_mismatches.json', encoding='utf-8') as f:
+            hard_mismatches = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # no hard_mismatches file; use empty dict
+        pass
 
     # ── 3. Readest groups index ──────────────────────────────────────────────
     # name → id  (for fast lookup and new group detection)
@@ -170,44 +334,100 @@ def migrate(
     new_groups_created: List[str] = []
 
     output_library = []
+    match_candidates: Dict[str, List] = {}
 
     for book in deepcopy(readest_library):
         title = book.get('title', '').strip()
         key = normalize_title(title)
-        match = doc_map.get(key)
 
-        if match:
-            uri, data = match
+        match = None
+
+        # 1) try direct identifier match (hash / metaHash)
+        book_hash = book.get('hash')
+        meta_hash = book.get('metaHash')
+        if book_hash:
+            match = md5_map.get(book_hash) or sha1_map.get(book_hash)
+        if not match and meta_hash:
+            match = md5_map.get(meta_hash) or sha1_map.get(meta_hash)
+
+        # 2) exact normalized title
+        if not match:
+            match = doc_map.get(key)
+
+        # 3) fuzzy matching
+        if not match:
+            best, candidates = find_best_match(title, key, doc_map, hard_mismatches)
+            if best:
+                match = best
+            else:
+                not_matched.append(title)
+                match_candidates[title] = candidates
+                output_library.append(book)
+                continue
+
+        # found a match
+        if title not in matched:
             matched.append(title)
 
-            # ── 4a. Progress ─────────────────────────────────────────────────
-            # Extract from doc_position and overwrite the Readest progress field
-            book['progress'] = extract_progress(data.get('doc_position', '{}'))
+        uri, data = match
 
-            # ── 4b. Group ────────────────────────────────────────────────────
-            coll_name = doc_to_coll.get(uri)
-            if coll_name:
-                # Create the group in Readest if it doesn't exist yet
-                if coll_name not in groups_by_name:
-                    new_id = generate_group_id(existing_ids)
-                    existing_ids.add(new_id)
-                    groups_by_name[coll_name] = new_id
-                    updated_groups.append({'groupId': new_id, 'groupName': coll_name})
-                    new_groups_created.append(f"'{coll_name}' → id={new_id}")
-
-                book['groupId'] = groups_by_name[coll_name]
-                book['groupName'] = coll_name
+        # get book's config.json
+        book_config_path = os.path.join(os.path.dirname(readest_library_path), 'config.json')
+        if os.path.isfile(book_config_path):
+            with open(book_config_path, encoding='utf-8') as f:
+                book_config: dict = json.load(f)
         else:
-            not_matched.append(title)
+            book_config = {
+                "searchConfig": {},
+                "schemaVersion": 1,
+            }
+
+        # ── 4a. Progress ─────────────────────────────────────────────────
+        progress = extract_progress(data.get('doc_position', '{}'))
+        book['progress'] = progress
+        book_config['progress'] = progress
+
+        # ── 4b. Group ────────────────────────────────────────────────────
+        coll_name = doc_to_coll.get(uri)
+        if coll_name:
+            # Create the group in Readest if it doesn't exist yet
+            if coll_name not in groups_by_name:
+                new_id = generate_group_id(existing_ids)
+                existing_ids.add(new_id)
+                groups_by_name[coll_name] = new_id
+                updated_groups.append({'groupId': new_id, 'groupName': coll_name})
+                new_groups_created.append(f"'{coll_name}' → id={new_id}")
+
+            book['groupId'] = groups_by_name[coll_name]
+            book['groupName'] = coll_name
 
         output_library.append(book)
 
+        # ── 4c. Booknotes ────────────────────────────────────────────────
+        # TODO
+
+        # ── 4d. Updated At ───────────────────────────────────────────────
+        book['updatedAt'] = int(datetime.now(timezone.utc).timestamp() * 1000)
+        book_config['updatedAt'] = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # ── 4e. Last Pushed At Config ────────────────────────────────────
+        book_config['lastPushedAtConfig'] = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        # ── 4f. Save book's config file ──────────────────────────────────
+        with open(book_config_path, 'w', encoding='utf-8') as f:
+            json.dump(book_config, f, ensure_ascii=False, separators=(',', ':'))
+
     # ── 5. Save output files ─────────────────────────────────────────────────
     with open(out_library_path, 'w', encoding='utf-8') as f:
-        json.dump(output_library, f, ensure_ascii=False, indent=4)
+        json.dump(output_library, f, ensure_ascii=False, separators=(',', ':'))
 
     with open(out_groups_path, 'w', encoding='utf-8') as f:
-        json.dump(updated_groups, f, ensure_ascii=False, indent=4)
+        json.dump(updated_groups, f, ensure_ascii=False, separators=(',', ':'))
+
+    # write match candidates for manual review (if any)
+    if match_candidates:
+        with open('readest_migrated/match_candidates.json', 'w', encoding='utf-8') as f:
+            json.dump(match_candidates, f, ensure_ascii=False, indent=2)
 
     # ── 6. Report ────────────────────────────────────────────────────────────
     sep = '─' * 62
@@ -240,17 +460,17 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--readera',
-        default='former_libraries/readera/library.json',
+        default=os.path.join(get_library_directory('readera'), 'library.json'),
         help='Library file exported from ReadEra',
     )
     parser.add_argument(
         '--readest',
-        default='former_libraries/readest/library.json',
+        default=os.path.join(get_library_directory('readest'), 'library.json'),
         help='Current Readest library file',
     )
     parser.add_argument(
         '--groups',
-        default='readest_groups.json',
+        default=get_readest_groups_filepath(),
         help='Readest groups file (id + name)',
     )
     parser.add_argument(
