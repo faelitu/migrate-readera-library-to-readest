@@ -30,11 +30,18 @@ import re
 import sys
 import json
 import uuid
+import glob
+import string
 import difflib
+import secrets
+import zipfile
 import argparse
 import platform
 import warnings
+import posixpath
 import unicodedata
+import xml.etree.ElementTree as ET
+from xml.dom import minidom, Node
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, Set, List
@@ -210,6 +217,366 @@ def extract_progress(doc_position_str: str) -> Optional[List[int]]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Booknotes: ReadEra citations → Readest annotations
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# A ReadEra citation stores its anchor as a crengine (CoolReader) xpointer, e.g.
+#     /body/DocFragment[21]/body/html/body/p[9]/text().337
+# which we translate into an EPUB Canonical Fragment Identifier (CFI), e.g.
+#     epubcfi(/6/42!/4/20,/1:0,/1:337)
+#
+# Mapping rules (validated against real ReadEra/Readest data):
+#   • DocFragment[N]            → spine step  /6/{2N}
+#   • an element that is the k-th element child of its parent → CFI step  2k
+#     (so a crengine typed index like p[9] must first be resolved to the real
+#      node, then re-numbered against *all* element siblings)
+#   • text().OFFSET            → /{2*(elements before)+1}:OFFSET
+# The actual content document (from the EPUB) is required to resolve element
+# indices correctly, because crengine's DOM differs from the raw XHTML.
+
+_BASE36 = string.digits + string.ascii_lowercase
+
+
+def generate_note_id(existing_ids: Set[str], length: int = 7) -> str:
+    """Random base36 id (e.g. "kl0a8t1"), unique against `existing_ids`."""
+    while True:
+        new_id = ''.join(secrets.choice(_BASE36) for _ in range(length))
+        if new_id not in existing_ids:
+            return new_id
+
+
+def _local_name(node) -> str:
+    name = node.localName or node.nodeName
+    return name.split(':')[-1] if name else ''
+
+
+class EpubContent:
+    """Minimal EPUB reader: resolves the spine and parses content documents.
+
+    Only the parts required for xPath→CFI conversion and page estimation are
+    implemented; everything is stdlib (`zipfile` + `xml.dom.minidom`).
+    """
+
+    def __init__(self, epub_path: str):
+        self._zip = zipfile.ZipFile(epub_path)
+        opf_path = self._find_opf()
+        self._opf_dir = posixpath.dirname(opf_path)
+        self.spine: List[Optional[str]] = self._parse_spine(opf_path)
+        self._dom_cache: Dict[str, minidom.Document] = {}
+        self._len_cache: Dict[int, int] = {}
+
+    def close(self) -> None:
+        self._zip.close()
+
+    def _find_opf(self) -> str:
+        root = ET.fromstring(self._zip.read('META-INF/container.xml'))
+        for el in root.iter():
+            if _local_tag(el.tag) == 'rootfile' and el.get('full-path'):
+                return el.get('full-path')
+        raise ValueError('EPUB container.xml has no rootfile')
+
+    def _resolve(self, href: str) -> str:
+        joined = posixpath.join(self._opf_dir, href) if self._opf_dir else href
+        return posixpath.normpath(joined)
+
+    def _parse_spine(self, opf_path: str) -> List[Optional[str]]:
+        root = ET.fromstring(self._zip.read(opf_path))
+        manifest: Dict[str, str] = {}
+        order: List[str] = []
+        for el in root.iter():
+            tag = _local_tag(el.tag)
+            if tag == 'item' and el.get('id'):
+                manifest[el.get('id')] = el.get('href')
+            elif tag == 'itemref' and el.get('idref'):
+                order.append(el.get('idref'))
+        return [self._resolve(manifest[i]) if manifest.get(i) else None for i in order]
+
+    def document(self, spine_index: int) -> minidom.Document:
+        """Parsed content document for the 1-based spine index."""
+        path = self.spine[spine_index - 1]
+        if path is None:
+            raise ValueError(f'spine item {spine_index} has no content document')
+        if path not in self._dom_cache:
+            self._dom_cache[path] = minidom.parseString(self._zip.read(path))
+        return self._dom_cache[path]
+
+    def text_length(self, spine_index: int) -> int:
+        """Number of characters of text content in the 1-based spine item."""
+        if spine_index in self._len_cache:
+            return self._len_cache[spine_index]
+        path = self.spine[spine_index - 1]
+        length = 0 if path is None else len(_text_content(self.document(spine_index)))
+        self._len_cache[spine_index] = length
+        return length
+
+    def total_text_length(self) -> int:
+        return sum(self.text_length(i) for i in range(1, len(self.spine) + 1))
+
+
+def _local_tag(tag: str) -> str:
+    return tag.split('}')[-1]
+
+
+def _text_content(node) -> str:
+    parts: List[str] = []
+    stack = list(node.childNodes)[::-1]
+    while stack:
+        cur = stack.pop()
+        if cur.nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE):
+            parts.append(cur.data)
+        elif cur.nodeType == Node.ELEMENT_NODE:
+            stack.extend(list(cur.childNodes)[::-1])
+    return ''.join(parts)
+
+
+def _parse_crengine_xpath(xpath: str) -> Tuple[int, List[str], Optional[int]]:
+    """Split a crengine xpointer into (docfragment_index, steps, offset).
+
+    e.g. "/body/DocFragment[21]/body/html/body/p[9]/text().337"
+         → (21, ['html', 'body', 'p[9]', 'text()'], 337)
+    The leading crengine wrappers (everything up to and including `html`) are
+    dropped so the remaining steps map onto the real content document.
+    """
+    match = re.match(r'^/body/DocFragment\[(\d+)\](/.*)$', xpath)
+    if not match:
+        raise ValueError(f'unrecognized crengine xpath: {xpath!r}')
+    fragment_index = int(match.group(1))
+    rest = match.group(2)
+
+    offset: Optional[int] = None
+    offset_match = re.search(r'\.(\d+)$', rest)
+    if offset_match:
+        offset = int(offset_match.group(1))
+        rest = rest[:offset_match.start()]
+
+    steps = [s for s in rest.split('/') if s]
+    if 'html' in steps:
+        steps = steps[steps.index('html') + 1:]
+    return fragment_index, steps, offset
+
+
+def _parse_step(step: str) -> Tuple[str, int]:
+    """`p[9]` → ('p', 9); `body` → ('body', 1)."""
+    match = re.match(r'^([^\[\]]+)(?:\[(\d+)\])?$', step)
+    if not match:
+        raise ValueError(f'unrecognized xpath step: {step!r}')
+    return match.group(1), int(match.group(2)) if match.group(2) else 1
+
+
+def _resolve_anchor(document: minidom.Document, steps: List[str]):
+    """Resolve crengine steps to (element_cfi_steps, text_step_or_None, target_node).
+
+    `element_cfi_steps` are the even CFI numbers for each element on the path;
+    `text_step` is the odd CFI number of the trailing text node (if any).
+    """
+    node = document.documentElement  # <html>
+    element_steps: List[int] = []
+    text_step: Optional[int] = None
+    target_node = node
+
+    for step in steps:
+        if step.startswith('text()'):
+            index_match = re.match(r'^text\(\)(?:\[(\d+)\])?$', step)
+            text_index = int(index_match.group(1)) if index_match and index_match.group(1) else 1
+            text_nodes = [c for c in node.childNodes
+                          if c.nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE)]
+            target_node = text_nodes[text_index - 1]
+            elements_before = 0
+            for child in node.childNodes:
+                if child is target_node:
+                    break
+                if child.nodeType == Node.ELEMENT_NODE:
+                    elements_before += 1
+            text_step = 2 * elements_before + 1
+            break
+
+        name, typed_index = _parse_step(step)
+        element_children = [c for c in node.childNodes if c.nodeType == Node.ELEMENT_NODE]
+        matches = [c for c in element_children if _local_name(c) == name]
+        node = matches[typed_index - 1]
+        element_steps.append(2 * (element_children.index(node) + 1))
+        target_node = node
+
+    return element_steps, text_step, target_node
+
+
+def _anchor_to_cfi(epub: EpubContent, xpath: str):
+    """Return (spine_step, element_steps, text_step, offset, target_node)."""
+    fragment_index, steps, offset = _parse_crengine_xpath(xpath)
+    document = epub.document(fragment_index)
+    element_steps, text_step, target_node = _resolve_anchor(document, steps)
+    return 2 * fragment_index, element_steps, text_step, offset, target_node
+
+
+def _leaf(text_step: Optional[int], offset: Optional[int]) -> str:
+    if text_step is None:
+        return ''
+    return f'/{text_step}:{offset}' if offset is not None else f'/{text_step}'
+
+
+def xpaths_to_cfi(epub: EpubContent, xpath_begin: str, xpath_end: str) -> str:
+    """Build a Readest/foliate range CFI from a citation's begin/end xpointers."""
+    spine_b, elems_b, text_b, off_b, _ = _anchor_to_cfi(epub, xpath_begin)
+    spine_e, elems_e, text_e, off_e, _ = _anchor_to_cfi(epub, xpath_end)
+
+    if spine_b == spine_e:
+        common_len = 0
+        while (common_len < len(elems_b) and common_len < len(elems_e)
+               and elems_b[common_len] == elems_e[common_len]):
+            common_len += 1
+        parent = f'/6/{spine_b}!' + ''.join(f'/{s}' for s in elems_b[:common_len])
+        start = ''.join(f'/{s}' for s in elems_b[common_len:]) + _leaf(text_b, off_b)
+        end = ''.join(f'/{s}' for s in elems_e[common_len:]) + _leaf(text_e, off_e)
+        return f'epubcfi({parent},{start},{end})'
+
+    # begin/end in different spine items: factor the range at the spine level
+    start = f'/{spine_b}!' + ''.join(f'/{s}' for s in elems_b) + _leaf(text_b, off_b)
+    end = f'/{spine_e}!' + ''.join(f'/{s}' for s in elems_e) + _leaf(text_e, off_e)
+    return f'epubcfi(/6,{start},{end})'
+
+
+def _chars_before(document: minidom.Document, target_node) -> int:
+    """Characters of text content appearing before `target_node` in document order."""
+    count = 0
+    found = False
+
+    def walk(node) -> None:
+        nonlocal count, found
+        for child in node.childNodes:
+            if found:
+                return
+            if child is target_node:
+                found = True
+                return
+            if child.nodeType in (Node.TEXT_NODE, Node.CDATA_SECTION_NODE):
+                count += len(child.data)
+            elif child.nodeType == Node.ELEMENT_NODE:
+                walk(child)
+
+    walk(document.documentElement)
+    return count
+
+
+def estimate_page(epub: EpubContent, xpath_begin: str, total_locations: int) -> Optional[int]:
+    """Estimate the Readest page of a highlight from its character fraction.
+
+    Readest derives a booknote's page from foliate's "locations" (the book split
+    into ~equal character blocks). We reproduce it as
+        round(fraction * total_locations) + 1
+    where `fraction` is (characters before the anchor) / (total characters).
+    """
+    if not total_locations:
+        return None
+    fragment_index, steps, offset = _parse_crengine_xpath(xpath_begin)
+    document = epub.document(fragment_index)
+    _, _, target_node = _resolve_anchor(document, steps)
+
+    chars_before = sum(epub.text_length(i) for i in range(1, fragment_index))
+    chars_before += _chars_before(document, target_node)
+    chars_before += offset or 0
+
+    total = epub.total_text_length()
+    if total <= 0:
+        return None
+    fraction = chars_before / total
+    return round(fraction * total_locations) + 1
+
+
+def read_nav_total(nav_path: str) -> int:
+    """Total number of foliate locations from a Readest `nav.json` file."""
+    try:
+        with open(nav_path, encoding='utf-8') as f:
+            nav = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return 0
+    for entry in nav.get('toc', []):
+        total = (entry.get('location') or {}).get('total')
+        if total:
+            return int(total)
+    return 0
+
+
+def find_book_epub(book_dir: str) -> Optional[str]:
+    matches = sorted(glob.glob(os.path.join(book_dir, '*.epub')))
+    return matches[0] if matches else None
+
+
+def build_booknotes(
+    citations: List[dict],
+    book: dict,
+    book_dir: str,
+) -> Tuple[List[dict], List[str]]:
+    """Convert a ReadEra doc's citations into Readest `annotation` booknotes.
+
+    Returns (booknotes, failures). Citations that cannot be converted are
+    skipped and reported in `failures` rather than aborting the book.
+    """
+    booknotes: List[dict] = []
+    failures: List[str] = []
+    if not citations:
+        return booknotes, failures
+
+    epub_path = find_book_epub(book_dir)
+    if not epub_path:
+        failures.append(f"{book.get('title', '')}: no .epub found in '{book_dir}'")
+        return booknotes, failures
+
+    try:
+        epub = EpubContent(epub_path)
+    except (OSError, zipfile.BadZipFile, ValueError, ET.ParseError) as exc:
+        failures.append(f"{book.get('title', '')}: cannot read EPUB ({exc})")
+        return booknotes, failures
+
+    total_locations = read_nav_total(os.path.join(book_dir, 'nav.json'))
+    used_ids: Set[str] = set()
+
+    try:
+        for citation in citations:
+            note_data_raw = citation.get('note_data') or '{}'
+            try:
+                note_data = json.loads(note_data_raw)
+            except (json.JSONDecodeError, TypeError):
+                note_data = {}
+
+            xpath_begin = note_data.get('xPath')
+            xpath_end = note_data.get('xPathEnd') or xpath_begin
+            text = citation.get('note_body') or ''
+            if not xpath_begin or not text:
+                continue
+
+            try:
+                cfi = xpaths_to_cfi(epub, xpath_begin, xpath_end)
+                page = estimate_page(epub, xpath_begin, total_locations)
+            except (ValueError, IndexError, AttributeError) as exc:
+                failures.append(f"{book.get('title', '')}: {xpath_begin} ({exc})")
+                continue
+
+            created = citation.get('note_insert_time') or int(
+                datetime.now(timezone.utc).timestamp() * 1000
+            )
+            modified = citation.get('note_modified_time') or created
+            note_id = generate_note_id(used_ids)
+            used_ids.add(note_id)
+
+            booknotes.append({
+                'id': note_id,
+                'type': 'annotation',
+                'cfi': cfi,
+                'style': 'underline',
+                'color': 'green',
+                'text': text,
+                'note': '',
+                'page': page,
+                'createdAt': created,
+                'updatedAt': modified,
+            })
+    finally:
+        epub.close()
+
+    return booknotes, failures
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # ReadEra library indexing
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -360,6 +727,10 @@ def migrate(
 
     # ── 2. Build ReadEra indexes ─────────────────────────────────────────────
     doc_map, doc_to_coll, md5_map, sha1_map = build_readera_index(readera)
+    # uri → citations (highlights), kept separate from the per-doc `data` index
+    uri_to_citations: Dict[str, List[dict]] = {
+        doc['uri']: doc.get('citations', []) for doc in readera.get('docs', [])
+    }
 
     # ── 2b. Load hard_mismatches for manual overrides ─────────────────────────
     hard_mismatches: Dict = {}
@@ -383,6 +754,8 @@ def migrate(
 
     output_library = []
     match_candidates: Dict[str, List] = {}
+    booknotes_migrated: Dict[str, int] = {}
+    booknote_failures: List[str] = []
 
     for book in deepcopy(readest_library):
         title = book.get('title', '').strip()
@@ -419,8 +792,10 @@ def migrate(
 
         uri, data = match
 
-        # get book's config.json
-        book_config_path = os.path.join(os.path.dirname(readest_library_path), 'config.json')
+        # get book's config.json (Readest stores one folder per book: <root>/<hash>/)
+        readest_root = os.path.dirname(readest_library_path)
+        book_dir = os.path.join(readest_root, book_hash) if book_hash else readest_root
+        book_config_path = os.path.join(book_dir, 'config.json')
         if os.path.isfile(book_config_path):
             with open(book_config_path, encoding='utf-8') as f:
                 book_config: dict = json.load(f)
@@ -452,7 +827,20 @@ def migrate(
         output_library.append(book)
 
         # ── 4c. Booknotes ────────────────────────────────────────────────
-        # TODO
+        # Migrate ReadEra citations (highlights) → Readest `annotation` booknotes.
+        # EPUB only for now; PDFs are handled separately.
+        book_format = (book.get('format') or data.get('doc_format') or '').upper()
+        citations = uri_to_citations.get(uri, [])
+        if citations and book_format == 'EPUB':
+            new_booknotes, failures = build_booknotes(citations, book, book_dir)
+            booknote_failures.extend(failures)
+            if new_booknotes:
+                existing_booknotes = book_config.get('booknotes') or []
+                book_config['booknotes'] = existing_booknotes + new_booknotes
+                now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+                book_config['lastSyncedAtNotes'] = now_ms
+                book_config['lastPushedAtNotes'] = now_ms
+                booknotes_migrated[title] = len(new_booknotes)
 
         # ── 4d. Updated At ───────────────────────────────────────────────
         book['updatedAt'] = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -462,6 +850,7 @@ def migrate(
         book_config['lastPushedAtConfig'] = int(datetime.now(timezone.utc).timestamp() * 1000)
 
         # ── 4f. Save book's config file ──────────────────────────────────
+        os.makedirs(os.path.dirname(book_config_path), exist_ok=True)
         with open(book_config_path, 'w', encoding='utf-8') as f:
             json.dump(book_config, f, ensure_ascii=False, separators=(',', ':'))
 
@@ -477,6 +866,12 @@ def migrate(
         with open('readest_migrated/match_candidates.json', 'w', encoding='utf-8') as f:
             json.dump(match_candidates, f, ensure_ascii=False, indent=2)
 
+    # write booknote conversion failures for manual review (if any)
+    if booknote_failures:
+        os.makedirs('readest_migrated', exist_ok=True)
+        with open('readest_migrated/booknote_failures.json', 'w', encoding='utf-8') as f:
+            json.dump(booknote_failures, f, ensure_ascii=False, indent=2)
+
     # ── 6. Report ────────────────────────────────────────────────────────────
     sep = '─' * 62
     print(sep)
@@ -491,6 +886,12 @@ def migrate(
     print(f'  New groups created    : {len(new_groups_created)}')
     for g in new_groups_created:
         print(f'    + {g}')
+    total_booknotes = sum(booknotes_migrated.values())
+    print(f'  Booknotes migrated    : {total_booknotes}')
+    for t, n in booknotes_migrated.items():
+        print(f'    ✎ {t} ({n})')
+    if booknote_failures:
+        print(f'  Booknotes skipped     : {len(booknote_failures)}')
     print()
     print(f'  → Library : {out_library_path}')
     print(f'  → Groups  : {out_groups_path}')
