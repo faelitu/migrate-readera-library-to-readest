@@ -1,0 +1,152 @@
+{
+    "docs": [
+        {
+            "uri": "sha-1:009e6e9218559766f79467072f30e191c9c656db",
+            "data": {
+                "doc_md5": "e6c9036e65b510f683865c4c46da1132",
+                "doc_sha1": "009e6e9218559766f79467072f30e191c9c656db",
+                "doc_active": 1,
+                "doc_format": "PDF",
+                "doc_file_name_title": "thinkstats2",
+                "doc_modified_time": 1706529615125,
+                "doc_file_size": 2068721,
+                "file_modified_time": 1706460995330,
+                "doc_colls_count": 1,
+                "doc_embeded_thumb_version": 0,
+                "doc_first_page_thumb_version": 9,
+                "doc_metadata_version": 0,
+                "doc_embedded_fonts_count": 0,
+                "doc_vertical_layout": 0,
+                "doc_delete_time": 0,
+                "doc_last_read_time": 1706529615124,
+                "doc_activity_time": 1706529615124,
+                "doc_favorites_time": 0,
+                "doc_have_read_time": 0,
+                "doc_to_read_time": 0,
+                "doc_position": "{\"ratio\":0.13307984790874525,\"configHash\":-260011871,\"page\":35,\"pagesCount\":264,\"offsetX\":0,\"offsetY\":0.8374010920524597,\"zoom\":1,\"originPage\":35,\"pageEnd\":-1}",
+                "doc_bookmarks": "[]",
+                "doc_search_tips": "[]",
+                "doc_rating": 0,
+                "meta_extra_version": 0
+            },
+            "aliases": [
+                "size:2068721-1706461266478-DEVICE_PLACEHOLDER"
+            ],
+            "bookmarks": [],
+            "citations": [],
+            "reviews": [],
+            "links": []
+        },
+        {
+            "uri": "sha-1:90ede8747e173c24f6f877d71b50d475e9c94327",
+            "data": {
+                "doc_md5": "b8c2147d693099e0dee736bc36663931",
+                "doc_sha1": "90ede8747e173c24f6f877d71b50d475e9c94327",
+                "doc_active": 1,
+                "doc_format": "EPUB",
+                "doc_file_name_title": "Crepusculo dos Idolos - Friedrich Nietzsch",
+                "doc_modified_time": 1772594346528,
+                "doc_file_size": 349355,
+                "doc_title": "Crepúsculo dos Ídolos",
+                "doc_authors": "Friedrich Nietzsche",
+                "doc_annotation": "Crepúsculo dos ídolos' foi a penúltima obra de Nietzsche, escrita e impressa em 1888, pouco antes de o filósofo perder a razão. O próprio Nietzsche a caracterizou - numa das cartas acrescentadas em apêndice a esta edição - como um aperitivo, destinado a 'abrir o apetite' dos leitores para a sua filosofia. Trata-se de uma síntese e introdução a toda a sua obra, e ao mesmo tempo uma 'declaração de guerra'. É com espírito guerreiro que ele se lança contra os 'ídolos', as ilusões antigas e novas do Ocidente; a moral cristã, os grandes equívocos da filosofia, as idéias e tendências modernas e seus representantes. De tão variados e abrangentes, esses ataques compõem um mosaico dos temas e atitudes do autor - o perspectivismo, o 'aristocratismo', o realismo ante a sexualidade, o materialismo, a abordagem psicológica de artistas e pensadores, o antigermanismo, a misoginia. O título é uma paródia do título de uma ópera de Wagner, 'Crepúsculo dos deuses'. No subtítulo, a palavra 'martelo' deve ser entendida como marreta, para destroçar os ídolos, e também como diapasão, para, ao tocar as estátuas dos ídolos, comprovar que são ocos.",
+                "file_modified_time": 1772593617359,
+                "doc_colls_count": 1,
+                "doc_lang": "pt",
+                "doc_embeded_thumb_version": 1,
+                "doc_first_page_thumb_version": 0,
+                "doc_metadata_version": 2,
+                "doc_embedded_fonts_count": 3,
+                "doc_vertical_layout": 0,
+                "doc_delete_time": 0,
+                "doc_last_read_time": 1772594346528,
+                "doc_activity_time": 1772594346528,
+                "doc_favorites_time": 0,
+                "doc_have_read_time": 0,
+                "doc_to_read_time": 0,
+                "doc_position": "{\"ratio\":0,\"configHash\":-1706238817,\"page\":0,\"pagesCount\":167,\"offsetX\":0,\"offsetY\":0,\"zoom\":1,\"originPage\":-1,\"xPath\":\"\\\/body\\\/DocFragment[1]\\\/body\\\/html\\\/body\\\/div\\\/svg\\\/image.0\",\"pageEnd\":-1,\"version\":2}",
+                "doc_bookmarks": "[]",
+                "doc_search_tips": "[]",
+                "doc_rating": 0,
+                "meta_extra_version": 0
+            },
+            "aliases": [
+                "size:349355-1772594086459-DEVICE_PLACEHOLDER"
+            ],
+            "bookmarks": [],
+            "citations": [],
+            "reviews": [],
+            "links": []
+        },
+        {
+            "uri": "sha-1:06cdc23c516a661ffb7154e23b5107ee8480d2cc",
+            "data": {
+                "doc_md5": "3542c839625af8fadf0c7b59633738d5",
+                "doc_sha1": "06cdc23c516a661ffb7154e23b5107ee8480d2cc",
+                "doc_active": 1,
+                "doc_format": "EPUB",
+                "doc_file_name_title": "dokumen.pub_o-estrangeiro-9788501117434",
+                "doc_modified_time": 1779572673430,
+                "doc_file_size": 1234174,
+                "doc_title": "O estrangeiro",
+                "doc_authors": "Albert Camus",
+                "file_modified_time": 1778459120432,
+                "doc_colls_count": 2,
+                "doc_lang": "pt",
+                "doc_embeded_thumb_version": 1,
+                "doc_first_page_thumb_version": 0,
+                "doc_metadata_version": 2,
+                "doc_embedded_fonts_count": 4,
+                "doc_vertical_layout": 0,
+                "doc_delete_time": 0,
+                "doc_last_read_time": 1779572673430,
+                "doc_activity_time": 1779572673430,
+                "doc_favorites_time": 0,
+                "doc_have_read_time": 0,
+                "doc_to_read_time": 0,
+                "doc_position": "{\"ratio\":0.13114754098360656,\"configHash\":-1706238817,\"page\":24,\"pagesCount\":184,\"offsetX\":0,\"offsetY\":0,\"zoom\":1,\"originPage\":-1,\"xPath\":\"\\\/body\\\/DocFragment[8]\\\/body\\\/html\\\/body\\\/div\\\/p[36]\\\/text().201\",\"pageEnd\":-1,\"version\":2}",
+                "doc_bookmarks": "[]",
+                "doc_search_tips": "[]",
+                "doc_rating": 0,
+                "meta_extra_version": 0
+            },
+            "aliases": [
+                "size:1234174-1778459148704-DEVICE_PLACEHOLDER"
+            ],
+            "bookmarks": [],
+            "citations": [],
+            "reviews": [],
+            "links": []
+        }
+    ],
+    "colls": [
+        {
+            "uri": "970d50c0-0bc2-4987-9475-81690de4e24a",
+            "data": {
+                "coll_title": "Ciência de Dados",
+                "coll_child": 0,
+                "doc_active_count": 1,
+                "coll_active_time": 1723973985625,
+                "coll_modified_time": 1723973986
+            },
+            "docs": [
+                "sha-1:009e6e9218559766f79467072f30e191c9c656db"
+            ]
+        },    
+        {
+            "uri": "63cc7bd0-2155-43a9-92ff-e53e0b3aa931",
+            "data": {
+                "coll_title": "Filosofia",
+                "coll_child": 0,
+                "doc_active_count": 2,
+                "coll_active_time": 1778472225931,
+                "coll_modified_time": 1778472225
+            },
+            "docs": [
+                "sha-1:90ede8747e173c24f6f877d71b50d475e9c94327",
+                "sha-1:06cdc23c516a661ffb7154e23b5107ee8480d2cc"
+            ]
+        }
+    ],
+    "words": []
+}

@@ -1,0 +1,130 @@
+[
+    {
+        "hash": "882e8cb4b0bf37cfa352d39702f4d816",
+        "metaHash": "8776751986ecf266aecbec22acc50228",
+        "format": "PDF",
+        "title": "thinkstats2",
+        "author": "",
+        "groupId": "1499777",
+        "groupName": "Ciência de Dados",
+        "tags": null,
+        "progress": [
+            35,
+            264
+        ],
+        "readingStatus": null,
+        "sourceTitle": "thinkstats2",
+        "metadata": {
+            "title": "thinkstats2",
+            "author": "",
+            "description": "",
+            "subject": [
+                "Estatística"
+            ]
+        },
+        "createdAt": 1781841820131,
+        "updatedAt": 1781849528552,
+        "deletedAt": null,
+        "uploadedAt": 1781844696990,
+        "coverDownloadedAt": 1781844872729,
+        "syncedAt": 1781849531265,
+        "downloadedAt": 1781846324478,
+        "primaryLanguage": "en"
+    },
+    {
+        "hash": "b3fe8d62feb7aae6bee9ad1865c59576",
+        "metaHash": "e4f2ba3f0bfafca75f0e22dd0c6925eb",
+        "format": "EPUB",
+        "title": "Crepúsculo dos Ídolos",
+        "author": "Friedrich Nietzsche",
+        "groupId": "f882f2c",
+        "groupName": "Filosofia",
+        "tags": null,
+        "progress": null,
+        "readingStatus": null,
+        "sourceTitle": "Crepúsculo dos Ídolos",
+        "metadata": {
+            "identifier": "ed371273-9bb7-4b7f-9895-195403f2aefa",
+            "title": "Crepúsculo dos Ídolos",
+            "sortAs": "Crepúsculo dos Ídolos",
+            "language": "pt",
+            "description": "<p class=\"description\">Crepúsculo dos ídolos' foi a penúltima obra de Nietzsche, escrita e impressa em 1888, pouco antes de o filósofo perder a razão. O próprio Nietzsche a caracterizou - numa das cartas acrescentadas em apêndice a esta edição - como um aperitivo, destinado a 'abrir o apetite' dos leitores para a sua filosofia. Trata-se de uma síntese e introdução a toda a sua obra, e ao mesmo tempo uma 'declaração de guerra'. É com espírito guerreiro que ele se lança contra os 'ídolos', as ilusões antigas e novas do Ocidente; a moral cristã, os grandes equívocos da filosofia, as idéias e tendências modernas e seus representantes. De tão variados e abrangentes, esses ataques compõem um mosaico dos temas e atitudes do autor - o perspectivismo, o 'aristocratismo', o realismo ante a sexualidade, o materialismo, a abordagem psicológica de artistas e pensadores, o antigermanismo, a misoginia. O título é uma paródia do título de uma ópera de Wagner, 'Crepúsculo dos deuses'. No subtítulo, a palavra 'martelo' deve ser entendida como marreta, para destroçar os ídolos, e também como diapasão, para, ao tocar as estátuas dos ídolos, comprovar que são ocos.</p>",
+            "published": "2015-10-26",
+            "modified": "2015-10-26",
+            "altIdentifier": [
+                "urn:uuid:ed371273-9bb7-4b7f-9895-195403f2aefa",
+                {
+                    "scheme": "calibre",
+                    "value": "014cc590-6a9a-427f-8b26-27e2f298ea40"
+                },
+                "urn:ISBN:9788580863987"
+            ],
+            "author": {
+                "name": "Friedrich Nietzsche",
+                "sortAs": "Friedrich Nietzsche",
+                "role": "aut"
+            },
+            "contributor": {
+                "name": "calibre (1.12.0) [http://calibre-ebook.com]",
+                "role": "bkp"
+            },
+            "isbn": "9788580863987"
+        },
+        "createdAt": 1781841802145,
+        "updatedAt": 1781844573515,
+        "deletedAt": null,
+        "uploadedAt": 1781844573515,
+        "coverDownloadedAt": 1781844865552,
+        "syncedAt": 1781849531265
+    },
+    {
+        "hash": "cffdabcb518826970c170a1ebbf5a2b4",
+        "metaHash": "1725854eb0f562bb86bab920ddddbdb7",
+        "format": "EPUB",
+        "title": "O estrangeiro",
+        "author": "Albert Camus",
+        "groupId": "f882f2c",
+        "groupName": "Filosofia",
+        "tags": null,
+        "progress": [
+            24,
+            184
+        ],
+        "readingStatus": null,
+        "sourceTitle": "O estrangeiro",
+        "metadata": {
+            "identifier": "urn:uuid:a53eecd0-ddae-4a8f-8092-1b6c5f863cd2",
+            "title": "O estrangeiro",
+            "sortAs": "estrangeiro, O",
+            "language": "pt",
+            "publisher": "Record",
+            "published": "2019-06-07T03:00:00+00:00",
+            "altIdentifier": [
+                "urn:uuid:a53eecd0-ddae-4a8f-8092-1b6c5f863cd2",
+                {
+                    "scheme": "calibre",
+                    "value": "a53eecd0-ddae-4a8f-8092-1b6c5f863cd2"
+                },
+                {
+                    "scheme": "MOBI-ASIN",
+                    "value": "B07STT6349"
+                }
+            ],
+            "author": {
+                "name": "Albert Camus",
+                "sortAs": "Camus, Albert",
+                "role": "aut"
+            },
+            "contributor": {
+                "name": "calibre (4.14.0) [https://calibre-ebook.com]",
+                "role": "bkp"
+            }
+        },
+        "createdAt": 1781841802378,
+        "updatedAt": 1781844580782,
+        "deletedAt": null,
+        "uploadedAt": 1781844580782,
+        "coverDownloadedAt": 1781844865552,
+        "syncedAt": 1781850619482
+    }
+]
