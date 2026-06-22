@@ -234,3 +234,6 @@ test.py
 
 # PDF CFI helper (Node) dependencies
 tools/pdf_cfi/node_modules/
+
+# Node helper
+package-lock.json
