@@ -78,11 +78,11 @@ def get_library_directory(program_name: str) -> str:
     if program_name.lower() == 'readest':
         readest_lib_dir = os.path.join(home, 'AppData', 'Roaming', 'com.bilingify.readest', 'Readest', 'Books')
 
-        if os.path.isfile(readest_lib_dir):
+        if os.path.isdir(readest_lib_dir):
             return readest_lib_dir
         else:
             warnings.warn(
-                f"Readest's library not found in current environment. "
+                f"Readest's library directory not found in current environment. "
                 f"Please upload the Readest's library files in './former_libraries/readest/'.",
                 UserWarning,
                 stacklevel=2
