@@ -226,8 +226,8 @@ former_libraries/**/*
 !former_libraries/readest/882e8cb4b0bf37cfa352d39702f4d816/
 !former_libraries/**/*_example.json
 
-readest_migrated/**
-!readest_migrated/**/*_example.json
+outputs/**
+!outputs/**/*_example.json
 
 # Misc.
 test.py

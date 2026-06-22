@@ -38,155 +38,21 @@ import secrets
 import zipfile
 import argparse
 import subprocess
-import platform
-import warnings
 import posixpath
-import unicodedata
 import xml.etree.ElementTree as ET
 from xml.dom import minidom, Node
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, Set, List
 
+from utils.paths import get_library_directory, get_readest_groups_filepath
+from utils.dedup import deduplicate_booknotes
+from utils.norms import normalize_title
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helper functions
 # ──────────────────────────────────────────────────────────────────────────────
-
-def get_library_directory(program_name: str) -> str:
-    """
-    """
-    home = None
-    if platform.system() == 'Windows':
-        home = os.getenv('USERPROFILE')
-    else:
-        home = os.getenv('HOME')
-
-    if not home:
-        raise EnvironmentError("Could not determine the user's home directory.")
-
-    if program_name.lower() == 'readera':
-        warnings.warn(
-            f"ReadEra support is not fully tested. Using the in-app directory as a fallback. "
-            f"Please upload the ReadEra's library file in './former_libraries/readera/'.",
-            UserWarning,
-            stacklevel=2
-        )
-        return os.path.join(
-            os.path.dirname(os.path.abspath(sys.argv[0])), 
-            'former_libraries', 'readera'
-        )
-    
-    if program_name.lower() == 'readest':
-        readest_lib_dir = os.path.join(home, 'AppData', 'Roaming', 'com.bilingify.readest', 'Readest', 'Books')
-
-        if os.path.isdir(readest_lib_dir):
-            return readest_lib_dir
-        else:
-            warnings.warn(
-                f"Readest's library directory not found in current environment. "
-                f"Please upload the Readest's library files in './former_libraries/readest/'.",
-                UserWarning,
-                stacklevel=2
-            )
-            return os.path.join(
-                os.path.dirname(os.path.abspath(sys.argv[0])), 
-                'former_libraries', 'readest'
-            )
-    else:
-        raise ValueError(f"Unknown program name: {program_name}")
-    
-def get_readest_groups_filepath():
-    readest_dir = get_library_directory('readest')
-    library_filepath = os.path.join(readest_dir, 'library.json')
-    groups_filepath = os.path.join(
-        os.path.dirname(os.path.abspath(sys.argv[0])),
-        'former_libraries', 'readest', 'groups.json'
-    )
-
-    if not os.path.isfile(library_filepath):
-        warnings.warn(
-            f"Readest library file not found at '{library_filepath}'. "
-            f"Using existing groups file if available: '{groups_filepath}'.",
-            UserWarning,
-            stacklevel=2
-        )
-        return groups_filepath
-
-    try:
-        with open(library_filepath, encoding='utf-8') as f:
-            readest_library = json.load(f)
-    except (OSError, json.JSONDecodeError) as exc:
-        warnings.warn(
-            f"Unable to load Readest library from '{library_filepath}': {exc}. "
-            f"Using existing groups file if available: '{groups_filepath}'.",
-            UserWarning,
-            stacklevel=2
-        )
-        return groups_filepath
-
-    groups: Dict[str, str] = {}
-    for book in readest_library:
-        group_id = book.get('groupId')
-        group_name = book.get('groupName')
-        if group_id and group_name:
-            groups[group_id] = group_name
-
-    if groups:
-        os.makedirs(os.path.dirname(groups_filepath), exist_ok=True)
-        try:
-            with open(groups_filepath, 'w', encoding='utf-8') as f:
-                json.dump(
-                    [{'groupId': gid, 'groupName': groups[gid]} for gid in sorted(groups)],
-                    f,
-                    ensure_ascii=False,
-                    indent=4,
-                )
-        except OSError as exc:
-            warnings.warn(
-                f"Unable to write Readest groups file to '{groups_filepath}': {exc}.",
-                UserWarning,
-                stacklevel=2
-            )
-
-    return groups_filepath
-
-
-def normalize_title(title: str) -> str:
-    """
-    Normalizes a title for comparison, tolerant of spelling variations:
-    converts to lowercase, removes accents and extra whitespace.
-
-    Example: "Crepúsculo dos Ídolos" → "crepusculo dos idolos"
-    """
-    if not title:
-        return ''
-
-    # remove diacritics
-    nfd = unicodedata.normalize('NFD', title)
-    sem_acentos = ''.join(c for c in nfd if not unicodedata.combining(c))
-    s = sem_acentos.lower()
-
-    # remove common noisy prefixes
-    prefixes = [r'^microsoft word -', r'^ebook\s*-?', r'^pdfcoffee\.com_', r'^pdfcoffee\.com', r'^dokumen\.pub_', r'^ebook\s']
-    for p in prefixes:
-        s = re.sub(p, ' ', s)
-
-    # normalize separators
-    s = s.replace('_', ' ').replace('-', ' ')
-
-    # strip common file extensions
-    s = re.sub(r"\.(rtf|docx?|pdf|epub)$", '', s)
-
-    # remove non-alphanumeric (keep spaces)
-    s = re.sub(r"[^0-9a-z ]+", ' ', s)
-
-    # collapse whitespace
-    s = re.sub(r'\s+', ' ', s).strip()
-
-    return s
-
-
 def generate_group_id(existing_ids: Set[str], length: int = 7) -> str:
     """
     Generates a random hexadecimal ID of `length` characters (lowercase),
@@ -569,7 +435,7 @@ def build_booknotes(
                 'xpointer0': None,
                 'xpointer1': None,
                 'page': page,
-                'text': text,
+                'text': text.replace('\n', ' '),
                 'style': 'underline',
                 'color': 'green',
                 'note': '',
@@ -977,18 +843,24 @@ def migrate(
         book_format = (book.get('format') or data.get('doc_format') or '').upper()
         citations = uri_to_citations.get(uri, [])
         new_booknotes: List[dict] = []
+
         failures: List[str] = []
         if citations and book_format == 'EPUB':
             new_booknotes, failures = build_booknotes(citations, book, book_dir)
         elif citations and book_format == 'PDF':
             new_booknotes, failures = build_pdf_booknotes(citations, book, book_dir)
         booknote_failures.extend(failures)
+
+        existing_booknotes = book_config.get('booknotes') or []
+        new_booknotes = deduplicate_booknotes(new_booknotes, existing_booknotes)
+        
         if new_booknotes:
-            existing_booknotes = book_config.get('booknotes') or []
-            book_config['booknotes'] = existing_booknotes + new_booknotes
+            book_config['booknotes'] = sorted(existing_booknotes + new_booknotes, key=lambda x: x['page'])
+
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
             book_config['lastSyncedAtNotes'] = now_ms
             book_config['lastPushedAtNotes'] = now_ms
+
             booknotes_migrated[title] = len(new_booknotes)
 
         # ── 4d. Updated At ───────────────────────────────────────────────
@@ -1007,19 +879,22 @@ def migrate(
     with open(out_library_path, 'w', encoding='utf-8') as f:
         json.dump(output_library, f, ensure_ascii=False, separators=(',', ':'))
 
+    # write updated groups for manual review
+    os.makedirs(os.path.dirname(out_groups_path), exist_ok=True)
     with open(out_groups_path, 'w', encoding='utf-8') as f:
-        json.dump(updated_groups, f, ensure_ascii=False, separators=(',', ':'))
+        json.dump(updated_groups, f, ensure_ascii=False, indent=4)
 
     # write match candidates for manual review (if any)
     if match_candidates:
-        with open('readest_migrated/match_candidates.json', 'w', encoding='utf-8') as f:
-            json.dump(match_candidates, f, ensure_ascii=False, indent=2)
+        os.makedirs('outputs', exist_ok=True)
+        with open('outputs/match_candidates.json', 'w', encoding='utf-8') as f:
+            json.dump(match_candidates, f, ensure_ascii=False, indent=4)
 
     # write booknote conversion failures for manual review (if any)
     if booknote_failures:
-        os.makedirs('readest_migrated', exist_ok=True)
-        with open('readest_migrated/booknote_failures.json', 'w', encoding='utf-8') as f:
-            json.dump(booknote_failures, f, ensure_ascii=False, indent=2)
+        os.makedirs('outputs', exist_ok=True)
+        with open('outputs/booknote_failures.json', 'w', encoding='utf-8') as f:
+            json.dump(booknote_failures, f, ensure_ascii=False, indent=4)
 
     # ── 6. Report ────────────────────────────────────────────────────────────
     sep = '─' * 62
@@ -1073,12 +948,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         '--out-library',
-        default='readest_migrated/library.json',
+        default=os.path.join(get_library_directory('readest', fallback='outputs'), 'library.json'),
         help='Output: Readest library with migrated progress and groups',
     )
     parser.add_argument(
         '--out-groups',
-        default='readest_migrated/groups.json',
+        default='outputs/updated_groups.json',
         help='Output: Readest groups file (including any newly created groups)',
     )
     return parser.parse_args()
