@@ -561,16 +561,21 @@ def build_booknotes(
             used_ids.add(note_id)
 
             booknotes.append({
+                'bookHash': book.get('hash'),
+                'metaHash': book.get('metaHash'),
                 'id': note_id,
                 'type': 'annotation',
                 'cfi': cfi,
+                'xpointer0': None,
+                'xpointer1': None,
+                'page': page,
+                'text': text,
                 'style': 'underline',
                 'color': 'green',
-                'text': text,
                 'note': '',
-                'page': page,
                 'createdAt': created,
                 'updatedAt': modified,
+                'deletedAt': None,
             })
     finally:
         epub.close()
