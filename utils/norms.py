@@ -5,6 +5,7 @@ TODO: write docstring
 import re
 import unicodedata
 
+
 def normalize_title(title: str) -> str:
     """
     Normalizes a title for comparison, tolerant of spelling variations:

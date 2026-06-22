@@ -1,18 +1,11 @@
 import os
 import json
 import argparse
-from typing import List
 
 from .paths import get_library_directory
-from .norms import normalize_title
 
 
-def deduplicate_booknotes(new_booknotes: List[dict], existing_booknotes: List[dict]):
-    existing_norm_texts = [normalize_title(bn['text']) for bn in existing_booknotes]
-    deduped = [bn for bn in new_booknotes if normalize_title(bn['text']) not in existing_norm_texts]
-    return deduped
-
-def fix_duplicated_bookmarks(readest_dir: str):
+def force_delete_bookmarks(readest_dir: str):
     books_dirs = [
         os.path.join(readest_dir, d)
         for d in os.listdir(readest_dir) 
@@ -32,27 +25,9 @@ def fix_duplicated_bookmarks(readest_dir: str):
         
         booknotes = book_config.get('booknotes') or []
         
-        dedup = []
-        text_found = []
-        dup_found = 0
-        del_found = 0
-        for booknote in booknotes:
-            norm_text = normalize_title(booknote['text'])
-            bn_type = booknote['type']
-            bn_page = booknote['page']
-            was_deleted = booknote['deletedAt']
-            if not was_deleted and (bn_type, bn_page, norm_text) not in text_found:
-                text_found.append((bn_type, bn_page, norm_text))
-                booknote['text'] = booknote['text'].replace('\n', '')
-                dedup.append(booknote)
-            elif was_deleted:
-                del_found += 1
-            else:
-                dup_found += 1
-        
-        if dup_found or del_found:
+        if booknotes:
             book_count += 1
-            book_config['booknotes'] = sorted(dedup, key=lambda x: x['page'])
+            book_config['booknotes'] = []
             with open(config_filepath, 'w', encoding='utf-8') as f:
                 json.dump(book_config, f, ensure_ascii=False, separators=(',', ':'))
             
@@ -60,14 +35,13 @@ def fix_duplicated_bookmarks(readest_dir: str):
             book = [b for b in library if b['hash'] == book_hash][0]
             book_title = book['title']
             print(f"{book_count}: {book_title}")
-            print(f"  - {dup_found}/{len(booknotes)} duplicated bookmarks found in {book_dir} and deleted.")
-            print(f"  - There was {del_found} deleted bookmarks archived - not anymore.")
-            print(f"  - {len(dedup)} bookmarks remaining.")
+            print(f"  - {len(booknotes)} bookmarks found in {book_dir} and deleted.")
+            print(f"  - {len(book_config['booknotes'])} bookmarks remaining.")
     
     if book_count:
-        print("All bookmarks deduplicated.")
+        print("All bookmarks deleted.")
     else:
-        print("No duplicated bookmarks found.")
+        print("No bookmarks found.")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -83,6 +57,6 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == '__main__':
     args = parse_args()
-    fix_duplicated_bookmarks(
+    force_delete_bookmarks(
         readest_dir=args.readest_dir
     )

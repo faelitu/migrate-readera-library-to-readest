@@ -9,6 +9,7 @@ import platform
 import warnings
 from typing import Dict
 
+
 def get_library_directory(program_name: str, fallback: str | None = None) -> str:
     """
     TODO: write docstring
