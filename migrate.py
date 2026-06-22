@@ -32,10 +32,12 @@ import json
 import uuid
 import glob
 import string
+import shutil
 import difflib
 import secrets
 import zipfile
 import argparse
+import subprocess
 import platform
 import warnings
 import posixpath
@@ -577,6 +579,144 @@ def build_booknotes(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Booknotes: ReadEra PDF citations → Readest annotations
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# PDFs have no shared text document: ReadEra anchors a citation with its own
+# extractor (e.g. "/page[19]/block[13]/line[0]/char[37]@x:y") while Readest
+# renders each page with pdf.js into an HTML text layer and stores highlights as
+# EPUB-style CFIs resolved against THAT DOM. The two index spaces don't map, so
+# we reproduce Readest's exact pipeline via a bundled Node helper (pdf.js +
+# foliate's own CFI generator) and locate the highlight by its text. We keep only
+# the page index from ReadEra's xpointer; the in-page CFI comes from pdf.js.
+
+PDF_CFI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools', 'pdf_cfi')
+PDF_CFI_SCRIPT = os.path.join(PDF_CFI_DIR, 'pdf_to_cfi.mjs')
+
+
+def parse_pdf_page0(xpath: str) -> Optional[int]:
+    """0-based page index N from a crengine PDF xpointer '/page[N]/...'."""
+    match = re.match(r'/page\[(\d+)\]', xpath or '')
+    return int(match.group(1)) if match else None
+
+
+def run_pdf_cfi_helper(pdf_path: str, items: List[dict]) -> List[dict]:
+    """Call the Node pdf.js helper to convert (page0, text) items into CFIs.
+
+    Returns a list aligned with `items`; each element is {'cfi': ...} on success
+    or {'error': ...} on a per-item failure. Raises RuntimeError if the helper
+    cannot be run at all (missing Node, missing deps, crash).
+    """
+    node = shutil.which('node')
+    if not node:
+        raise RuntimeError("Node.js ('node') not found on PATH; required for PDF highlights")
+    if not os.path.isdir(os.path.join(PDF_CFI_DIR, 'node_modules')):
+        raise RuntimeError(f"PDF helper dependencies missing; run `npm install` in {PDF_CFI_DIR}")
+
+    payload = json.dumps({'pdf': pdf_path, 'items': items})
+    proc = subprocess.run(
+        [node, PDF_CFI_SCRIPT],
+        input=payload, capture_output=True, text=True, cwd=PDF_CFI_DIR,
+    )
+    if not proc.stdout:
+        raise RuntimeError(f"PDF helper produced no output: {proc.stderr.strip()[:500]}")
+    try:
+        out = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"PDF helper returned invalid JSON: {proc.stdout[:300]}")
+    if isinstance(out, dict) and out.get('error'):
+        raise RuntimeError(f"PDF helper error: {out['error']}")
+    return out.get('results', [])
+
+
+def find_book_pdf(book_dir: str) -> Optional[str]:
+    matches = sorted(glob.glob(os.path.join(book_dir, '*.pdf')))
+    return matches[0] if matches else None
+
+
+def build_pdf_booknotes(
+    citations: List[dict],
+    book: dict,
+    book_dir: str,
+) -> Tuple[List[dict], List[str]]:
+    """Convert a ReadEra PDF doc's citations into Readest `annotation` booknotes.
+
+    Returns (booknotes, failures). Citations that cannot be converted are skipped
+    and reported in `failures` rather than aborting the book.
+    """
+    booknotes: List[dict] = []
+    failures: List[str] = []
+    title = book.get('title', '')
+    if not citations:
+        return booknotes, failures
+
+    pdf_path = find_book_pdf(book_dir)
+    if not pdf_path:
+        failures.append(f"{title}: no .pdf found in '{book_dir}'")
+        return booknotes, failures
+
+    prepared: List[Tuple[dict, int, str]] = []
+    for citation in citations:
+        try:
+            note_data = json.loads(citation.get('note_data') or '{}')
+        except (json.JSONDecodeError, TypeError):
+            note_data = {}
+        page0 = parse_pdf_page0(note_data.get('xPath') or '')
+        text = citation.get('note_body') or ''
+        if page0 is None or not text:
+            failures.append(f"{title}: citation missing page/text")
+            continue
+        prepared.append((citation, page0, text))
+
+    if not prepared:
+        return booknotes, failures
+
+    items = [{'page0': page0, 'text': text} for (_, page0, text) in prepared]
+    try:
+        results = run_pdf_cfi_helper(pdf_path, items)
+    except RuntimeError as exc:
+        failures.append(f"{title}: {exc}")
+        return booknotes, failures
+
+    book_hash = book.get('hash')
+    meta_hash = book.get('metaHash')
+    used_ids: Set[str] = set()
+
+    for (citation, page0, text), result in zip(prepared, results):
+        cfi = (result or {}).get('cfi')
+        if not cfi:
+            failures.append(f"{title}: page {page0} ({(result or {}).get('error', 'no cfi')})")
+            continue
+
+        created = citation.get('note_insert_time') or int(
+            datetime.now(timezone.utc).timestamp() * 1000
+        )
+        modified = citation.get('note_modified_time') or created
+        note_id = generate_note_id(used_ids)
+        used_ids.add(note_id)
+
+        booknotes.append({
+            'bookHash': book_hash,
+            'metaHash': meta_hash,
+            'id': note_id,
+            'type': 'annotation',
+            'cfi': cfi,
+            'xpointer0': None,
+            'xpointer1': None,
+            'page': page0 + 1,
+            'text': text,
+            'style': 'underline',
+            'color': 'green',
+            'note': '',
+            'createdAt': created,
+            'updatedAt': modified,
+            'deletedAt': None,
+        })
+
+    return booknotes, failures
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # ReadEra library indexing
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -828,19 +968,23 @@ def migrate(
 
         # ── 4c. Booknotes ────────────────────────────────────────────────
         # Migrate ReadEra citations (highlights) → Readest `annotation` booknotes.
-        # EPUB only for now; PDFs are handled separately.
+        # EPUBs convert the xpointer directly; PDFs go through the pdf.js helper.
         book_format = (book.get('format') or data.get('doc_format') or '').upper()
         citations = uri_to_citations.get(uri, [])
+        new_booknotes: List[dict] = []
+        failures: List[str] = []
         if citations and book_format == 'EPUB':
             new_booknotes, failures = build_booknotes(citations, book, book_dir)
-            booknote_failures.extend(failures)
-            if new_booknotes:
-                existing_booknotes = book_config.get('booknotes') or []
-                book_config['booknotes'] = existing_booknotes + new_booknotes
-                now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-                book_config['lastSyncedAtNotes'] = now_ms
-                book_config['lastPushedAtNotes'] = now_ms
-                booknotes_migrated[title] = len(new_booknotes)
+        elif citations and book_format == 'PDF':
+            new_booknotes, failures = build_pdf_booknotes(citations, book, book_dir)
+        booknote_failures.extend(failures)
+        if new_booknotes:
+            existing_booknotes = book_config.get('booknotes') or []
+            book_config['booknotes'] = existing_booknotes + new_booknotes
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            book_config['lastSyncedAtNotes'] = now_ms
+            book_config['lastPushedAtNotes'] = now_ms
+            booknotes_migrated[title] = len(new_booknotes)
 
         # ── 4d. Updated At ───────────────────────────────────────────────
         book['updatedAt'] = int(datetime.now(timezone.utc).timestamp() * 1000)

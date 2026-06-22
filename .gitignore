@@ -231,3 +231,6 @@ readest_migrated/**
 
 # Misc.
 test.py
+
+# PDF CFI helper (Node) dependencies
+tools/pdf_cfi/node_modules/
