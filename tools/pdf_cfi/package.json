@@ -6,7 +6,7 @@
   "description": "Generate Readest-compatible EPUB CFIs for PDF highlights using pdf.js (the same engine Readest uses).",
   "main": "pdf_to_cfi.mjs",
   "dependencies": {
-    "jsdom": "^28.1.0",
+    "jsdom": "^26.1.0",
     "pdfjs-dist": "5.5.207"
   }
 }
