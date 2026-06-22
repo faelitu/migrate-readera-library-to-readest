@@ -42,12 +42,13 @@ import posixpath
 import xml.etree.ElementTree as ET
 from xml.dom import minidom, Node
 from copy import deepcopy
-from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, Set, List
 
+from utils.times import now_ms
 from utils.paths import get_library_directory, get_readest_groups_filepath
 from utils.dedup import deduplicate_booknotes
 from utils.norms import normalize_title
+from utils.delete import delete_bookmarks
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -419,10 +420,8 @@ def build_booknotes(
                 failures.append(f"{book.get('title', '')}: {xpath_begin} ({exc})")
                 continue
 
-            created = citation.get('note_insert_time') or int(
-                datetime.now(timezone.utc).timestamp() * 1000
-            )
-            modified = citation.get('note_modified_time') or created
+            created = citation.get('note_insert_time') or now_ms()
+            modified = now_ms()
             note_id = generate_note_id(used_ids)
             used_ids.add(note_id)
 
@@ -435,7 +434,7 @@ def build_booknotes(
                 'xpointer0': None,
                 'xpointer1': None,
                 'page': page,
-                'text': text.replace('\n', ' '),
+                'text': text.replace('\n', ''),
                 'style': 'underline',
                 'color': 'green',
                 'note': '',
@@ -559,10 +558,8 @@ def build_pdf_booknotes(
             failures.append(f"{title}: page {page0} ({(result or {}).get('error', 'no cfi')})")
             continue
 
-        created = citation.get('note_insert_time') or int(
-            datetime.now(timezone.utc).timestamp() * 1000
-        )
-        modified = citation.get('note_modified_time') or created
+        created = citation.get('note_insert_time') or now_ms()
+        modified = now_ms()
         note_id = generate_note_id(used_ids)
         used_ids.add(note_id)
 
@@ -575,7 +572,7 @@ def build_pdf_booknotes(
             'xpointer0': None,
             'xpointer1': None,
             'page': page0 + 1,
-            'text': text,
+            'text': text.replace('\n', ''),
             'style': 'underline',
             'color': 'green',
             'note': '',
@@ -794,6 +791,7 @@ def migrate(
             else:
                 not_matched.append(title)
                 match_candidates[title] = candidates
+                book['updatedAt'] = now_ms()
                 output_library.append(book)
                 continue
 
@@ -835,6 +833,7 @@ def migrate(
             book['groupId'] = groups_by_name[coll_name]
             book['groupName'] = coll_name
 
+        book['updatedAt'] = now_ms()
         output_library.append(book)
 
         # ── 4c. Booknotes ────────────────────────────────────────────────
@@ -856,21 +855,17 @@ def migrate(
         
         if new_booknotes:
             book_config['booknotes'] = sorted(existing_booknotes + new_booknotes, key=lambda x: x['page'])
-
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            book_config['lastSyncedAtNotes'] = now_ms
-            book_config['lastPushedAtNotes'] = now_ms
-
             booknotes_migrated[title] = len(new_booknotes)
 
-        # ── 4d. Updated At ───────────────────────────────────────────────
-        book['updatedAt'] = int(datetime.now(timezone.utc).timestamp() * 1000)
-        book_config['updatedAt'] = int(datetime.now(timezone.utc).timestamp() * 1000)
+        # ── 4d. Time Updates ─────────────────────────────────────────────
+        book['updatedAt'] = now_ms()
+        book_config['updatedAt'] = now_ms()
+        book_config['lastSyncedAtNotes'] = now_ms()
+        book_config["lastSyncedAtConfig"] = now_ms()
+        book_config['lastPushedAtNotes'] = now_ms()
+        book_config['lastPushedAtConfig'] = now_ms()
 
-        # ── 4e. Last Pushed At Config ────────────────────────────────────
-        book_config['lastPushedAtConfig'] = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-        # ── 4f. Save book's config file ──────────────────────────────────
+        # ── 4e. Save book's config file ──────────────────────────────────
         os.makedirs(os.path.dirname(book_config_path), exist_ok=True)
         with open(book_config_path, 'w', encoding='utf-8') as f:
             json.dump(book_config, f, ensure_ascii=False, separators=(',', ':'))
@@ -956,11 +951,21 @@ def parse_args() -> argparse.Namespace:
         default='outputs/updated_groups.json',
         help='Output: Readest groups file (including any newly created groups)',
     )
+    parser.add_argument(
+        '--force', '-f',
+        default=False,
+        help="Deletes all Readest's bookmarks beforehand then apply the migrations",
+    )
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_args()
+    if args.force:
+        print("⚠ Force Migration: Deleting Readest's existing bookmarks...")
+        delete_bookmarks(
+            readest_dir=os.path.dirname(args.readest)
+        )
     migrate(
         readera_path=args.readera,
         readest_library_path=args.readest,
