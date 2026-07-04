@@ -277,6 +277,33 @@ def _anchor_to_cfi(epub: EpubContent, xpath: str):
     return 2 * fragment_index, element_steps, text_step, offset, target_node
 
 
+def extract_epub_location(epub: EpubContent, xpath: str) -> Optional[str]:
+    """Convert a ReadEra doc_position xPath to a single-point EPUB CFI.
+
+    Uses the parsed EPUB structure for an exact paragraph/character position.
+    Returns None if conversion fails.
+    """
+    try:
+        spine_step, element_steps, text_step, offset, _ = _anchor_to_cfi(epub, xpath)
+        inner = ''.join(f'/{s}' for s in element_steps) + _leaf(text_step, offset)
+        return f'epubcfi(/6/{spine_step}!{inner})'
+    except (ValueError, IndexError, AttributeError):
+        return None
+
+
+def fallback_epub_location(xpath: str) -> Optional[str]:
+    """Chapter-level CFI from the DocFragment index (no EPUB file needed).
+
+    Used when the EPUB file is not available or the xPath cannot be resolved.
+    Points to the start of the correct spine item rather than the exact paragraph.
+    """
+    match = re.search(r'DocFragment\[(\d+)\]', xpath)
+    if not match:
+        return None
+    fragment_index = int(match.group(1))
+    return f'epubcfi(/6/{fragment_index * 2}!/4/2/1:0)'
+
+
 def _leaf(text_step: Optional[int], offset: Optional[int]) -> str:
     if text_step is None:
         return ''
@@ -814,10 +841,42 @@ def migrate(
                 "schemaVersion": 1,
             }
 
-        # ── 4a. Progress ─────────────────────────────────────────────────
+        # book_format is needed by both 4a (location) and 4c (booknotes)
+        book_format = (book.get('format') or data.get('doc_format') or '').upper()
+
+        # ── 4a. Progress + Location ───────────────────────────────────────
         progress = extract_progress(data.get('doc_position', '{}'))
         book['progress'] = progress
         book_config['progress'] = progress
+
+        # The `location` field in config.json is what the Readest reader
+        # actually uses to restore the reading position when opening a book.
+        # `library.json`'s `progress` is display-only (the % under the cover).
+        # Without `location`, the reader always opens at the beginning.
+        if progress:
+            try:
+                pos = json.loads(data.get('doc_position', '{}'))
+                xpath = pos.get('xPath', '')
+            except (json.JSONDecodeError, TypeError):
+                xpath = ''
+
+            if book_format == 'EPUB' and xpath:
+                epub_path = find_book_epub(book_dir)
+                location: Optional[str] = None
+                if epub_path:
+                    try:
+                        epub = EpubContent(epub_path)
+                        try:
+                            location = extract_epub_location(epub, xpath)
+                        finally:
+                            epub.close()
+                    except (OSError, zipfile.BadZipFile, ValueError, ET.ParseError):
+                        pass
+                # fall back to chapter-level CFI if exact conversion failed
+                if not location:
+                    location = fallback_epub_location(xpath)
+                if location:
+                    book_config['location'] = location
 
         # ── 4b. Group ────────────────────────────────────────────────────
         coll_name = doc_to_coll.get(uri)
@@ -839,7 +898,6 @@ def migrate(
         # ── 4c. Booknotes ────────────────────────────────────────────────
         # Migrate ReadEra citations (highlights) → Readest `annotation` booknotes.
         # EPUBs convert the xpointer directly; PDFs go through the pdf.js helper.
-        book_format = (book.get('format') or data.get('doc_format') or '').upper()
         citations = uri_to_citations.get(uri, [])
         new_booknotes: List[dict] = []
 
